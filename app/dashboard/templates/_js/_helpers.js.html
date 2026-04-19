@@ -1,0 +1,96 @@
+{# Shared JS helpers for Drive dashboard. #}
+<script>
+  function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    const opts = { timeZone: 'America/Argentina/Buenos_Aires', hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric', hour12: false };
+    const p = new Intl.DateTimeFormat('es-AR', opts).formatToParts(d);
+    const g = (t) => p.find(x => x.type === t)?.value || '';
+    return `${g('hour')}:${g('minute')} ${g('day')}/${g('month')}/${g('year')}`;
+  }
+
+  function timeAgo(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    const now = new Date();
+    const secs = Math.floor((now - d) / 1000);
+    if (secs < 60) return 'hace ' + secs + 's';
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return 'hace ' + mins + 'min';
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return 'hace ' + hrs + 'h';
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return 'hace ' + days + 'd';
+    return formatDate(dateStr);
+  }
+
+  function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function healthBadge(status) {
+    const s = (status || 'unknown').toLowerCase();
+    return `<span class="badge badge-${s}">${s}</span>`;
+  }
+
+  function formatBytes(bytes) {
+    if (!bytes && bytes !== 0) return '—';
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  function mimeIcon(mimeType) {
+    if (!mimeType) return 'file';
+    if (mimeType.includes('folder')) return 'folder';
+    if (mimeType.includes('pdf')) return 'file-text';
+    if (mimeType.startsWith('image/')) return 'image';
+    if (mimeType.includes('spreadsheet') || mimeType.includes('csv') || mimeType.includes('excel')) return 'table';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'file-text';
+    return 'file';
+  }
+
+  function mimeLabel(mimeType) {
+    if (!mimeType) return 'otro';
+    if (mimeType.includes('folder')) return 'carpeta';
+    if (mimeType.includes('pdf')) return 'PDF';
+    if (mimeType.startsWith('image/jpeg')) return 'JPEG';
+    if (mimeType.startsWith('image/png')) return 'PNG';
+    if (mimeType.startsWith('image/')) return 'imagen';
+    if (mimeType.includes('spreadsheet') || mimeType.includes('excel')) return 'Excel';
+    if (mimeType.includes('csv')) return 'CSV';
+    if (mimeType.includes('word')) return 'Word';
+    if (mimeType.includes('text/plain')) return 'TXT';
+    return mimeType.split('/').pop().substring(0, 10);
+  }
+
+  function mimeBadgeClass(mimeType) {
+    if (!mimeType) return 'badge-other';
+    if (mimeType.includes('folder')) return 'badge-folder';
+    if (mimeType.includes('pdf')) return 'badge-pdf';
+    if (mimeType.startsWith('image/')) return 'badge-image';
+    if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'badge-spreadsheet';
+    if (mimeType.includes('word') || mimeType.includes('document')) return 'badge-document';
+    return 'badge-other';
+  }
+
+  function mimeBadge(mimeType) {
+    return `<span class="badge ${mimeBadgeClass(mimeType)}">${mimeLabel(mimeType)}</span>`;
+  }
+
+  function showToast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = 'toast toast-' + type;
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.textContent = msg;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('show'));
+    setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 300); }, 3000);
+  }
+</script>

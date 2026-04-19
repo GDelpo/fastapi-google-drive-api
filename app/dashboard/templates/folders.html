@@ -1,0 +1,145 @@
+{# Folders page — list, create, browse #}
+{% extends "shell.html" %}
+
+{% block title %}{{ service_name }} — Carpetas{% endblock %}
+
+{% block page_content %}
+<div id="folders-page">
+  <!-- Actions row -->
+  <div class="flex flex-wrap items-center gap-3 mb-6">
+    <input type="text" id="filter-search" class="input max-w-xs" placeholder="Buscar carpeta por nombre..." />
+    <button onclick="loadFolders()" class="btn btn-primary text-xs">
+      <i data-lucide="search" class="w-3.5 h-3.5"></i> Buscar
+    </button>
+    <div class="flex-1"></div>
+    <button onclick="showCreateModal()" class="btn btn-success text-xs">
+      <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i> Nueva carpeta
+    </button>
+  </div>
+
+  <!-- Folders grid -->
+  <div id="folders-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+    <div class="skeleton h-24 w-full rounded-xl"></div>
+    <div class="skeleton h-24 w-full rounded-xl"></div>
+    <div class="skeleton h-24 w-full rounded-xl"></div>
+  </div>
+  <div id="folders-empty" class="hidden text-center py-12" style="color: var(--color-text-muted);">
+    <i data-lucide="folder-x" class="w-12 h-12 mx-auto mb-3"></i>
+    <p class="text-sm">No se encontraron carpetas</p>
+  </div>
+</div>
+
+<!-- Create folder modal -->
+<div id="create-modal" class="fixed inset-0 z-50 hidden items-center justify-center" style="background: rgba(0,0,0,.6);">
+  <div class="card p-6 w-full max-w-sm mx-4">
+    <h3 class="text-base font-semibold mb-4">Nueva carpeta</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="block text-xs font-medium uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">Nombre</label>
+        <input type="text" id="create-name" class="input" placeholder="Mi carpeta" required />
+      </div>
+      <div>
+        <label class="block text-xs font-medium uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">Carpeta padre (opcional)</label>
+        <input type="text" id="create-parent" class="input" placeholder="Folder ID" />
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button onclick="hideCreateModal()" class="btn btn-ghost text-xs">Cancelar</button>
+      <button onclick="doCreate()" class="btn btn-primary text-xs">
+        <i data-lucide="folder-plus" class="w-3.5 h-3.5"></i> Crear
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script>
+  document.body.dataset.currentPage = 'folders';
+
+  function refreshCurrentPage() { loadFolders(); }
+
+  async function loadFolders() {
+    const query = document.getElementById('filter-search').value.trim();
+    let url = '/files?mime_type=' + encodeURIComponent('application/vnd.google-apps.folder') + '&page_size=100';
+    if (query) url += '&query=' + encodeURIComponent(query);
+
+    const resp = await apiFetch(url);
+    if (!resp?.ok) return;
+
+    const data = await resp.json();
+    renderFolders(data.files || []);
+  }
+
+  function renderFolders(folders) {
+    const grid = document.getElementById('folders-grid');
+    const empty = document.getElementById('folders-empty');
+
+    if (!folders.length) {
+      grid.innerHTML = '';
+      empty.classList.remove('hidden');
+      return;
+    }
+
+    empty.classList.add('hidden');
+    grid.innerHTML = folders.map(f => `
+      <a href="${BASE}/dashboard/folders/${f.id}" class="card p-4 hover:border-[var(--color-accent)] transition-colors block">
+        <div class="flex items-center gap-3 mb-2">
+          <i data-lucide="folder" class="w-5 h-5" style="color: var(--color-warning);"></i>
+          <span class="font-medium text-sm truncate" style="color: var(--color-text-primary);">${esc(f.name)}</span>
+        </div>
+        <div class="text-xs" style="color: var(--color-text-muted);">
+          ${timeAgo(f.createdAt)}
+        </div>
+      </a>
+    `).join('');
+    lucide.createIcons();
+  }
+
+  function showCreateModal() {
+    document.getElementById('create-name').value = '';
+    document.getElementById('create-parent').value = '';
+    document.getElementById('create-modal').classList.remove('hidden');
+    document.getElementById('create-modal').classList.add('flex');
+    document.getElementById('create-name').focus();
+  }
+
+  function hideCreateModal() {
+    document.getElementById('create-modal').classList.add('hidden');
+    document.getElementById('create-modal').classList.remove('flex');
+  }
+
+  async function doCreate() {
+    const name = document.getElementById('create-name').value.trim();
+    if (!name) { showToast('Ingresá un nombre', 'error'); return; }
+    const parentId = document.getElementById('create-parent').value.trim() || null;
+
+    const body = { name };
+    if (parentId) body.parentFolderId = parentId;
+
+    const resp = await apiFetch('/folders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (resp?.ok || resp?.status === 201) {
+      showToast('Carpeta creada');
+      hideCreateModal();
+      loadFolders();
+    } else {
+      showToast('Error al crear carpeta', 'error');
+    }
+  }
+
+  document.getElementById('create-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) hideCreateModal();
+  });
+
+  document.getElementById('filter-search').addEventListener('keyup', (e) => {
+    if (e.key === 'Enter') loadFolders();
+  });
+
+  loadFolders();
+</script>
+{% endblock %}

@@ -1,0 +1,35 @@
+# ============================================================================
+# Drive Service - Docker Compose (Production Standalone)
+# ============================================================================
+#
+# Production deployment without Traefik.
+# Access API directly at: http://localhost:8084
+# ============================================================================
+
+name: drive-prod
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    container_name: drive_api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DEBUG: "false"
+    ports:
+      - "${API_PORT:-8084}:8084"
+    volumes:
+      - ../credentials:/app/credentials:ro
+      - drive_logs:/app/logs
+    networks:
+      - drive_network
+
+networks:
+  drive_network:
+    driver: bridge
+
+volumes:
+  drive_logs:

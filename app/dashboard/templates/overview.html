@@ -1,0 +1,238 @@
+{# Overview page — stats + health + quota + recent files #}
+{% extends "shell.html" %}
+
+{% block title %}{{ service_name }} — Resumen{% endblock %}
+
+{% block page_content %}
+<div id="overview-page">
+  <!-- Stats row -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+    <div class="stat-card">
+      <div class="stat-value" id="stat-files">—</div>
+      <div class="stat-label">Archivos</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="stat-folders" style="color: var(--color-warning);">—</div>
+      <div class="stat-label">Carpetas</div>
+    </div>
+  </div>
+
+  <!-- Root folder card (full width) -->
+  <div class="card p-5 mb-6" id="root-folder-card">
+    <h2 class="text-sm font-semibold mb-3 flex items-center gap-2">
+      <i data-lucide="folder-root" class="w-4 h-4"></i> Carpeta raíz
+    </h2>
+    <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-medium" style="color: var(--color-text-muted);">Nombre</span>
+        <a id="root-name" href="#" class="text-sm font-semibold" style="color: var(--color-accent);">—</a>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-medium" style="color: var(--color-text-muted);">ID</span>
+        <code id="root-id" class="text-xs font-mono px-2 py-0.5 rounded" style="background: var(--color-surface-alt); color: var(--color-text-secondary);">—</code>
+        <button id="copy-root-id" class="inline-flex items-center justify-center w-5 h-5 rounded" style="color: var(--color-text-muted); cursor: pointer;" title="Copiar ID">
+          <i data-lucide="copy" class="w-3 h-3"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Health card (full width) -->
+  <div class="card p-5 mb-6">
+    <h2 class="text-sm font-semibold mb-4 flex items-center gap-2">
+      <i data-lucide="activity" class="w-4 h-4"></i> Estado del servicio
+    </h2>
+    <div id="health-status" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-3">
+      <div class="skeleton h-4 w-full"></div>
+      <div class="skeleton h-4 w-3/4"></div>
+      <div class="skeleton h-4 w-2/3"></div>
+    </div>
+  </div>
+
+  <!-- Quota card (full width) -->
+  <div class="card p-5 mb-6" id="quota-card">
+    <h2 class="text-sm font-semibold mb-4 flex items-center gap-2">
+      <i data-lucide="hard-drive" class="w-4 h-4"></i> Almacenamiento
+    </h2>
+    <div id="quota-content">
+      <div class="skeleton h-4 w-full"></div>
+    </div>
+  </div>
+
+  <!-- Recent files -->
+  <div class="card">
+    <div class="px-5 py-4 flex items-center justify-between border-b" style="border-color: var(--color-border-subtle);">
+      <h2 class="text-sm font-semibold">Últimos archivos</h2>
+      <a href="{{ base }}/dashboard/files" class="text-xs font-medium" style="color: var(--color-accent);">Ver todos →</a>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="data-table w-full" id="overview-files-table">
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Tipo</th>
+            <th>Tamaño</th>
+            <th>Modificado</th>
+          </tr>
+        </thead>
+        <tbody id="overview-files-body">
+          <tr><td colspan="4" class="text-center py-8"><div class="skeleton h-4 w-48 mx-auto"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script>
+  document.body.dataset.currentPage = 'overview';
+
+  function refreshCurrentPage() { loadOverview(); }
+
+  async function loadOverview() {
+    const [statsResp, healthResp, filesResp, quotaResp] = await Promise.all([
+      apiFetch('/stats'),
+      fetch(BASE + '/health').then(r => r.ok ? r.json() : null).catch(() => null),
+      apiFetch('/recent?limit=10'),
+      apiFetch('/quota'),
+    ]);
+
+    // Stats
+    if (statsResp?.ok) {
+      const s = await statsResp.json();
+      document.getElementById('stat-files').textContent = s.totalFiles ?? 0;
+      document.getElementById('stat-folders').textContent = s.totalFolders ?? 0;
+    }
+
+    // Root folder info — rendered from backend context, no extra API call
+    const rootId = '{{ root_folder_id }}';
+    const rootName = '{{ root_folder_name }}';
+    const rootNameEl = document.getElementById('root-name');
+    const rootIdEl = document.getElementById('root-id');
+    if (rootId) {
+      rootIdEl.textContent = rootId;
+      rootNameEl.textContent = rootName || 'Sin nombre';
+      rootNameEl.href = BASE + '/dashboard/folders/' + rootId;
+    } else {
+      rootNameEl.textContent = 'No configurada';
+      rootNameEl.removeAttribute('href');
+      rootIdEl.textContent = 'N/A';
+    }
+
+    // Copy button
+    document.getElementById('copy-root-id')?.addEventListener('click', () => {
+      const id = rootIdEl.textContent;
+      if (id && id !== 'N/A') {
+        navigator.clipboard.writeText(id).then(() => {
+          const btn = document.getElementById('copy-root-id');
+          btn.innerHTML = '<i data-lucide="check" class="w-3 h-3" style="color:var(--color-success)"></i>';
+          lucide.createIcons();
+          setTimeout(() => { btn.innerHTML = '<i data-lucide="copy" class="w-3 h-3"></i>'; lucide.createIcons(); }, 1500);
+        }).catch(() => {
+          // Fallback for non-HTTPS contexts
+          const ta = document.createElement('textarea'); ta.value = id; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+        });
+      }
+    });
+
+    // Health
+    const healthEl = document.getElementById('health-status');
+    if (healthResp) {
+      const deps = healthResp.dependencies || {};
+      const authMode = healthResp.authMode || 'unknown';
+      const isOAuth = authMode.toLowerCase().includes('oauth');
+      const authBadgeColor = isOAuth ? 'var(--color-success)' : 'var(--color-warning)';
+      const authIcon = isOAuth ? 'shield-check' : 'key';
+
+      let items = `<div class="flex items-center justify-between text-sm">
+        <span>General</span>${healthBadge(healthResp.status)}
+      </div>`;
+      items += `<div class="flex items-center justify-between text-sm">
+        <span style="color:var(--color-text-secondary)">Autenticación</span>
+        <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style="background:color-mix(in srgb, ${authBadgeColor} 15%, transparent); color:${authBadgeColor}">
+          <i data-lucide="${authIcon}" class="w-3 h-3"></i>${esc(authMode)}
+        </span>
+      </div>`;
+      for (const [name, dep] of Object.entries(deps)) {
+        const label = name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' ');
+        items += `<div class="flex items-center justify-between text-sm">
+          <span style="color:var(--color-text-secondary)">${esc(label)}</span>
+          ${healthBadge(dep.status)}
+        </div>`;
+        if (dep.error) {
+          items += `<div class="text-xs font-mono pl-2 mt-0.5" style="color:var(--color-error)">${esc(dep.error)}</div>`;
+        }
+      }
+      items += `<div class="flex items-center justify-between text-sm pt-3 mt-1 border-t" style="border-color:var(--color-border-subtle)">
+        <span style="color:var(--color-text-muted)">Versión</span>
+        <span class="font-mono text-xs" style="color:var(--color-text-secondary)">v${esc(healthResp.version)} · ${esc(healthResp.environment)}</span>
+      </div>`;
+      healthEl.innerHTML = items;
+    } else {
+      healthEl.innerHTML = '<div class="text-sm" style="color:var(--color-error)">No se pudo obtener el estado</div>';
+    }
+
+    // Quota
+    const quotaEl = document.getElementById('quota-content');
+    if (quotaResp?.ok) {
+      const q = await quotaResp.json();
+      const isOAuthQuota = (q.authMode || '').toLowerCase().includes('oauth');
+      const pct = q.usagePercent ?? 0;
+      const barColor = pct > 90 ? 'var(--color-error)' : pct > 70 ? 'var(--color-warning)' : 'var(--color-success)';
+
+      let html = `<div class="flex items-center justify-between text-sm mb-2">
+        <span>${formatBytes(q.usedBytes)} usados de ${formatBytes(q.totalBytes)}</span>
+        <span class="font-mono text-xs font-semibold" style="color:${barColor}">${pct}%</span>
+      </div>
+      <div class="w-full rounded-full h-2" style="background:var(--color-surface-alt)">
+        <div class="h-2 rounded-full transition-all" style="width:${Math.min(pct, 100)}%; background:${barColor}"></div>
+      </div>
+      <div class="flex items-center justify-between text-xs mt-2" style="color:var(--color-text-muted)">
+        <span>${formatBytes(q.availableBytes)} disponible</span>
+        <span>${esc(q.authMode || '')}</span>
+      </div>`;
+
+      if (!isOAuthQuota) {
+        html += `<div class="flex items-center gap-2 text-xs mt-3 p-2 rounded" style="background:color-mix(in srgb, var(--color-warning) 10%, transparent); color:var(--color-warning)">
+          <i data-lucide="alert-triangle" class="w-3.5 h-3.5 flex-shrink-0"></i>
+          <span>Cuota de la cuenta de servicio (15 GB). Configurar OAuth2 para usar la cuota de la cuenta personal.</span>
+        </div>`;
+      }
+      quotaEl.innerHTML = html;
+      lucide.createIcons();
+    } else {
+      quotaEl.innerHTML = '<div class="text-sm" style="color:var(--color-text-muted)">No se pudo obtener la cuota</div>';
+    }
+
+    // Recent files
+    if (filesResp?.ok) {
+      const data = await filesResp.json();
+      renderRecentFiles(data.files || []);
+    }
+  }
+
+  function renderRecentFiles(files) {
+    const tbody = document.getElementById('overview-files-body');
+    if (!files.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center py-8" style="color:var(--color-text-muted)">No hay archivos</td></tr>';
+      return;
+    }
+    tbody.innerHTML = files.map(f => {
+      return `<tr onclick="window.location.href='${BASE}/dashboard/files/${f.id}'">
+        <td class="font-medium flex items-center gap-2" style="color:var(--color-text-primary)">
+          <i data-lucide="${mimeIcon(f.mimeType)}" class="w-4 h-4 flex-shrink-0" style="color:var(--color-text-muted)"></i>
+          <span class="truncate max-w-[300px]">${esc(f.name)}</span>
+        </td>
+        <td>${mimeBadge(f.mimeType)}</td>
+        <td class="text-xs font-mono">${formatBytes(f.size)}</td>
+        <td class="text-xs whitespace-nowrap">${timeAgo(f.modifiedAt || f.createdAt)}</td>
+      </tr>`;
+    }).join('');
+    lucide.createIcons();
+  }
+
+  loadOverview();
+</script>
+{% endblock %}

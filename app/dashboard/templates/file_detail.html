@@ -1,0 +1,176 @@
+{# File detail page — view, rename, download, delete #}
+{% extends "shell.html" %}
+
+{% block title %}{{ service_name }} — Archivo{% endblock %}
+
+{% block page_content %}
+<div id="file-detail-page">
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-6">
+    <div class="flex items-center gap-4">
+      <a href="{{ base }}/dashboard/files" class="btn btn-ghost p-2"><i data-lucide="arrow-left" class="w-4 h-4"></i></a>
+      <div>
+        <h2 id="file-name" class="text-xl font-bold">Cargando...</h2>
+        <p id="file-meta" class="text-sm mt-1" style="color: var(--color-text-muted);"></p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2" id="file-actions"></div>
+  </div>
+
+  <!-- Info grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <!-- Metadata card -->
+    <div class="card p-5">
+      <h3 class="text-sm font-semibold mb-4">Información</h3>
+      <div id="file-info" class="space-y-3">
+        <div class="skeleton h-4 w-full"></div>
+        <div class="skeleton h-4 w-3/4"></div>
+        <div class="skeleton h-4 w-2/3"></div>
+      </div>
+    </div>
+
+    <!-- Rename card -->
+    <div class="card p-5">
+      <h3 class="text-sm font-semibold mb-4">Renombrar</h3>
+      <div class="flex items-end gap-3">
+        <div class="flex-1">
+          <label class="block text-xs font-medium uppercase tracking-wider mb-1.5" style="color: var(--color-text-muted);">Nuevo nombre</label>
+          <input type="text" id="rename-input" class="input" placeholder="nombre-archivo.pdf" />
+        </div>
+        <button onclick="doRename()" class="btn btn-primary text-xs">
+          <i data-lucide="pencil" class="w-3.5 h-3.5"></i> Renombrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Danger zone -->
+  <div class="card p-5" style="border-color: var(--color-error-soft);">
+    <h3 class="text-sm font-semibold mb-2" style="color: var(--color-error);">Zona peligrosa</h3>
+    <p class="text-xs mb-4" style="color: var(--color-text-muted);">Eliminar este archivo de Google Drive. Esta acción no se puede deshacer.</p>
+    <button onclick="doDelete()" class="btn btn-danger text-xs">
+      <i data-lucide="trash-2" class="w-3.5 h-3.5"></i> Eliminar archivo
+    </button>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script>
+  document.body.dataset.currentPage = 'files';
+
+  const FILE_ID = '{{ file_id }}';
+  let currentFile = null;
+
+  function refreshCurrentPage() { loadFile(); }
+
+  async function loadFile() {
+    const resp = await apiFetch('/files/' + FILE_ID);
+    if (!resp?.ok) {
+      document.getElementById('file-name').innerHTML =
+        'Archivo no encontrado <button onclick="loadFile()" class="btn btn-ghost text-xs ml-2"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Reintentar</button>';
+      lucide.createIcons();
+      return;
+    }
+    currentFile = await resp.json();
+    renderFile();
+  }
+
+  function renderFile() {
+    const f = currentFile;
+    document.getElementById('file-name').textContent = f.name;
+    document.getElementById('file-meta').textContent = `${mimeLabel(f.mimeType)} · ${formatBytes(f.size)}`;
+    document.getElementById('rename-input').value = f.name;
+
+    // Info
+    const info = document.getElementById('file-info');
+    info.innerHTML = `
+      <div class="flex items-center justify-between text-sm">
+        <span style="color:var(--color-text-muted)">ID</span>
+        <span class="font-mono text-xs">${esc(f.id)}</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <span style="color:var(--color-text-muted)">Tipo</span>
+        ${mimeBadge(f.mimeType)}
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <span style="color:var(--color-text-muted)">Tamaño</span>
+        <span>${formatBytes(f.size)}</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <span style="color:var(--color-text-muted)">Creado</span>
+        <span>${formatDate(f.createdAt)}</span>
+      </div>
+      <div class="flex items-center justify-between text-sm">
+        <span style="color:var(--color-text-muted)">Modificado</span>
+        <span>${formatDate(f.modifiedAt)}</span>
+      </div>
+    `;
+
+    // Actions
+    const actions = document.getElementById('file-actions');
+    let btns = '';
+    if (f.viewLink) {
+      btns += `<a href="${f.viewLink}" target="_blank" class="btn btn-ghost text-xs"><i data-lucide="external-link" class="w-3.5 h-3.5"></i> Ver en Drive</a>`;
+      btns += `<button onclick="copyShareLink()" class="btn btn-ghost text-xs"><i data-lucide="link" class="w-3.5 h-3.5"></i> Copiar link</button>`;
+    }
+    btns += `<button onclick="doDownload()" class="btn btn-primary text-xs"><i data-lucide="download" class="w-3.5 h-3.5"></i> Descargar</button>`;
+    actions.innerHTML = btns;
+    lucide.createIcons();
+  }
+
+  async function doDownload() {
+    if (!currentFile) return;
+    await apiDownload('/files/' + FILE_ID + '/download', currentFile.name);
+  }
+
+  function copyShareLink() {
+    if (!currentFile?.viewLink) return;
+    const link = currentFile.viewLink;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(link).then(() => {
+        showToast('Link copiado al portapapeles', 'success');
+      }).catch(() => _fallbackCopy(link));
+    } else {
+      _fallbackCopy(link);
+    }
+  }
+
+  function _fallbackCopy(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showToast('Link copiado al portapapeles', 'success');
+  }
+
+  async function doRename() {
+    const name = document.getElementById('rename-input').value.trim();
+    if (!name) { showToast('Ingresá un nombre', 'error'); return; }
+    const resp = await apiFetch('/files/' + FILE_ID, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (resp?.ok) {
+      showToast('Archivo renombrado');
+      loadFile();
+    } else {
+      showToast('Error al renombrar', 'error');
+    }
+  }
+
+  async function doDelete() {
+    if (!confirm('¿Eliminar este archivo? Esta acción no se puede deshacer.')) return;
+    const resp = await apiFetch('/files/' + FILE_ID, { method: 'DELETE' });
+    if (resp && (resp.ok || resp.status === 204)) {
+      showToast('Archivo eliminado');
+      window.location.href = BASE + '/dashboard/files';
+    } else {
+      showToast('Error al eliminar', 'error');
+    }
+  }
+
+  loadFile();
+</script>
+{% endblock %}

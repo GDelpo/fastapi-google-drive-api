@@ -1,0 +1,382 @@
+{# Files page — browse, search, upload, delete #}
+{% extends "shell.html" %}
+
+{% block title %}{{ service_name }} — Archivos{% endblock %}
+
+{% block page_content %}
+<div id="files-page">
+  <!-- Filters panel (collapsible) -->
+  <details id="filter-panel" class="filter-panel card mb-4" open>
+    <summary class="flex items-center justify-between px-5 py-3 cursor-pointer select-none">
+      <span class="text-sm font-medium flex items-center gap-2" style="color:var(--color-text-secondary)">
+        <i data-lucide="sliders-horizontal" class="w-4 h-4" aria-hidden="true"></i>
+        Filtros
+        <span id="filter-badge" class="badge badge-active hidden" style="font-size:10px">0</span>
+      </span>
+      <i data-lucide="chevron-down" class="w-4 h-4 filter-chevron" aria-hidden="true"></i>
+    </summary>
+    <div class="px-5 pb-4 pt-3 border-t" style="border-color:var(--color-border-subtle)">
+      <div class="flex flex-wrap items-center gap-3">
+        <input type="text" id="filter-search" class="input max-w-xs" placeholder="Buscar por nombre..."
+               oninput="updateFilterBadge()" />
+        <input type="text" id="filter-folder" class="input max-w-[200px]" placeholder="Folder ID (opcional)"
+               oninput="updateFilterBadge()" />
+        <button onclick="loadFiles()" class="btn btn-primary text-xs">
+          <i data-lucide="search" class="w-3.5 h-3.5" aria-hidden="true"></i> Buscar
+        </button>
+        <button onclick="clearFilters()" class="btn btn-ghost btn-sm text-xs">Limpiar</button>
+        <div class="flex-1"></div>
+        <button onclick="showUploadModal()" class="btn btn-success text-xs">
+          <i data-lucide="upload" class="w-3.5 h-3.5" aria-hidden="true"></i> Subir archivo
+        </button>
+      </div>
+    </div>
+  </details>
+
+  <!-- Files table -->
+  <div class="card">
+    <div class="overflow-x-auto">
+      <table class="data-table w-full">
+        <thead>
+          <tr>
+            <th class="sortable-col cursor-pointer select-none" onclick="setSort('name')">
+              <span class="flex items-center gap-1">
+                Nombre
+                <span class="sort-icon" id="sort-name"></span>
+              </span>
+            </th>
+            <th>Tipo</th>
+            <th class="sortable-col cursor-pointer select-none" onclick="setSort('size')">
+              <span class="flex items-center gap-1">
+                Tamaño
+                <span class="sort-icon" id="sort-size"></span>
+              </span>
+            </th>
+            <th class="sortable-col cursor-pointer select-none" onclick="setSort('createdAt')">
+              <span class="flex items-center gap-1">
+                Creado
+                <span class="sort-icon" id="sort-createdAt"></span>
+              </span>
+            </th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="files-body">
+          <tr><td colspan="5" class="text-center py-8"><div class="skeleton h-4 w-48 mx-auto"></div></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- Pagination -->
+    <div id="files-pagination" class="px-5 py-3 flex items-center justify-between border-t" style="border-color: var(--color-border-subtle);">
+      <span class="text-xs" style="color: var(--color-text-muted);" id="files-count">—</span>
+      <div class="flex gap-2">
+        <button id="btn-load-more" onclick="loadMore()" class="btn btn-ghost text-xs hidden">Cargar más</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Upload Modal -->
+<div id="upload-modal" class="fixed inset-0 z-50 hidden items-center justify-center" style="background: rgba(0,0,0,.6);">
+  <div class="card p-6 w-full max-w-md mx-4">
+    <h3 class="text-base font-semibold mb-4">Subir archivo</h3>
+    <div id="drop-zone" class="drop-zone mb-4">
+      <i data-lucide="upload-cloud" class="w-8 h-8 mx-auto mb-2" style="color: var(--color-text-muted);" aria-hidden="true"></i>
+      <p class="text-sm" style="color: var(--color-text-secondary);">Arrastrá un archivo o hacé click para seleccionar</p>
+      <input type="file" id="upload-file-input" class="hidden" multiple />
+    </div>
+    <div id="upload-file-list" class="space-y-2 mb-4 text-sm" style="color: var(--color-text-secondary);"></div>
+    <div id="upload-progress" class="hidden mb-4">
+      <div class="progress-bar"><div class="progress-fill" id="upload-progress-bar" style="width:0%"></div></div>
+      <p class="text-xs mt-1 text-center" id="upload-progress-text" style="color:var(--color-text-muted)"></p>
+    </div>
+    <div class="flex items-center gap-3 mb-4">
+      <input type="text" id="upload-folder-id" class="input flex-1" placeholder="Folder ID (opcional)" />
+    </div>
+    <div class="flex justify-end gap-2">
+      <button onclick="hideUploadModal()" class="btn btn-ghost text-xs">Cancelar</button>
+      <button id="btn-upload" onclick="doUpload()" class="btn btn-primary text-xs">
+        <i data-lucide="upload" class="w-3.5 h-3.5" aria-hidden="true"></i> Subir
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block page_scripts %}
+<script>
+  document.body.dataset.currentPage = 'files';
+
+  let nextPageToken = null;
+  let loadedFiles = [];
+  let sortField = 'name';
+  let sortDir = 'asc';
+
+  function refreshCurrentPage() { loadFiles(); }
+
+  // ── Filter badge ────────────────────────────────────────────────────────────
+  function updateFilterBadge() {
+    const query = document.getElementById('filter-search')?.value.trim() || '';
+    const folder = document.getElementById('filter-folder')?.value.trim() || '';
+    const count = [query, folder].filter(Boolean).length;
+    const badge = document.getElementById('filter-badge');
+    if (badge) {
+      badge.textContent = count;
+      badge.classList.toggle('hidden', count === 0);
+    }
+  }
+
+  function clearFilters() {
+    const searchEl = document.getElementById('filter-search');
+    const folderEl = document.getElementById('filter-folder');
+    if (searchEl) searchEl.value = '';
+    if (folderEl) folderEl.value = '';
+    updateFilterBadge();
+    loadFiles();
+  }
+
+  // ── Sort ────────────────────────────────────────────────────────────────────
+  function setSort(field) {
+    if (sortField === field) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortField = field;
+      sortDir = 'asc';
+    }
+    updateSortIcons();
+    renderFiles(sortData(loadedFiles));
+  }
+
+  function sortData(data) {
+    return [...data].sort((a, b) => {
+      let va = a[sortField] ?? '';
+      let vb = b[sortField] ?? '';
+      if (typeof va === 'string') va = va.toLowerCase();
+      if (typeof vb === 'string') vb = vb.toLowerCase();
+      if (va < vb) return sortDir === 'asc' ? -1 : 1;
+      if (va > vb) return sortDir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
+  function updateSortIcons() {
+    document.querySelectorAll('.sort-icon').forEach(el => {
+      el.classList.remove('active');
+      el.innerHTML = '';
+    });
+    const icon = document.getElementById('sort-' + sortField);
+    if (icon) {
+      icon.classList.add('active');
+      icon.innerHTML = sortDir === 'asc'
+        ? '<i data-lucide="chevron-up" class="w-3 h-3" aria-hidden="true"></i>'
+        : '<i data-lucide="chevron-down" class="w-3 h-3" aria-hidden="true"></i>';
+      lucide.createIcons();
+    }
+  }
+
+  // ── Load ────────────────────────────────────────────────────────────────────
+  async function loadFiles(append = false) {
+    if (!append) { nextPageToken = null; loadedFiles = []; }
+
+    const query = document.getElementById('filter-search').value.trim();
+    const folderId = document.getElementById('filter-folder').value.trim();
+
+    let url = '/files?page_size=50';
+    if (query) url += '&query=' + encodeURIComponent(query);
+    if (folderId) url += '&folder_id=' + encodeURIComponent(folderId);
+    if (nextPageToken) url += '&page_token=' + encodeURIComponent(nextPageToken);
+
+    const resp = await apiFetch(url);
+    if (!resp?.ok) {
+      if (!append) {
+        const tbody = document.getElementById('files-body');
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8" style="color:var(--color-text-muted)">Error al cargar archivos — <a href="javascript:loadFiles()" style="color:var(--color-accent)">reintentar</a></td></tr>';
+      }
+      return;
+    }
+
+    const data = await resp.json();
+    const files = data.files || [];
+    nextPageToken = data.nextPageToken || null;
+
+    if (append) {
+      loadedFiles = loadedFiles.concat(files);
+    } else {
+      loadedFiles = files;
+    }
+
+    updateFilterBadge();
+    renderFiles(sortData(loadedFiles));
+  }
+
+  function loadMore() { loadFiles(true); }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  function renderFiles(filesToShow) {
+    const tbody = document.getElementById('files-body');
+    const countEl = document.getElementById('files-count');
+
+    if (!filesToShow || !filesToShow.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8" style="color:var(--color-text-muted)">No se encontraron archivos con los filtros aplicados.</td></tr>';
+      if (countEl) countEl.textContent = '0 archivos';
+      document.getElementById('btn-load-more').classList.add('hidden');
+      return;
+    }
+
+    tbody.innerHTML = filesToShow.map(f => {
+      const isFolder = f.mimeType && f.mimeType.includes('folder');
+      const href = isFolder ? `${BASE}/dashboard/folders/${f.id}` : `${BASE}/dashboard/files/${f.id}`;
+      return `<tr onclick="window.location.href='${href}'">
+        <td class="font-medium flex items-center gap-2" style="color:var(--color-text-primary)">
+          <i data-lucide="${mimeIcon(f.mimeType)}" class="w-4 h-4 flex-shrink-0" style="color:var(--color-text-muted)" aria-hidden="true"></i>
+          <span class="truncate max-w-[350px]">${esc(f.name)}</span>
+        </td>
+        <td>${mimeBadge(f.mimeType)}</td>
+        <td class="text-xs font-mono">${formatBytes(f.size)}</td>
+        <td class="text-xs whitespace-nowrap">${timeAgo(f.createdAt)}</td>
+        <td>
+          <div class="flex items-center gap-1" onclick="event.stopPropagation()">
+            ${f.viewLink ? `<a href="${f.viewLink}" target="_blank" class="btn btn-ghost text-xs p-1.5" title="Ver en Drive"><i data-lucide="external-link" class="w-3.5 h-3.5" aria-hidden="true"></i></a>` : ''}
+            ${!isFolder ? `<button onclick="downloadItem('${f.id}', '${esc(f.name)}')" class="btn btn-ghost text-xs p-1.5" title="Descargar"><i data-lucide="download" class="w-3.5 h-3.5" aria-hidden="true"></i></button>` : ''}
+            ${!isFolder ? `<button onclick="deleteItem('${f.id}', '${esc(f.name)}')" class="btn btn-ghost text-xs p-1.5" title="Eliminar" style="color:var(--color-error)"><i data-lucide="trash-2" class="w-3.5 h-3.5" aria-hidden="true"></i></button>` : ''}
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // Cursor-based pagination info (no total count from Google Drive API)
+    const hasMore = !!nextPageToken;
+    if (countEl) {
+      countEl.textContent = hasMore
+        ? `Mostrando ${loadedFiles.length} archivos — hay más`
+        : `${loadedFiles.length} archivos`;
+    }
+    document.getElementById('btn-load-more').classList.toggle('hidden', !nextPageToken);
+    lucide.createIcons();
+  }
+
+  async function downloadItem(id, name) {
+    await apiDownload('/files/' + id + '/download', name);
+  }
+
+  async function deleteItem(id, name) {
+    if (!confirm(`¿Eliminar "${name}"?`)) return;
+    const resp = await apiFetch('/files/' + id, { method: 'DELETE' });
+    if (resp && (resp.ok || resp.status === 204)) {
+      showToast('Archivo eliminado');
+      loadFiles();
+    } else {
+      showToast('Error al eliminar', 'error');
+    }
+  }
+
+  // ── Upload modal ────────────────────────────────────────────────────────────
+  let selectedFiles = [];
+
+  function showUploadModal() {
+    selectedFiles = [];
+    document.getElementById('upload-file-list').innerHTML = '';
+    document.getElementById('upload-file-input').value = '';
+    document.getElementById('upload-modal').classList.remove('hidden');
+    document.getElementById('upload-modal').classList.add('flex');
+  }
+
+  function hideUploadModal() {
+    document.getElementById('upload-modal').classList.add('hidden');
+    document.getElementById('upload-modal').classList.remove('flex');
+  }
+
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('upload-file-input');
+
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+  dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    handleFiles(e.dataTransfer.files);
+  });
+  fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+  function handleFiles(files) {
+    selectedFiles = Array.from(files);
+    const listEl = document.getElementById('upload-file-list');
+    listEl.innerHTML = selectedFiles.map(f =>
+      `<div class="flex items-center gap-2"><i data-lucide="file" class="w-3.5 h-3.5" aria-hidden="true"></i> ${esc(f.name)} <span class="font-mono text-xs" style="color:var(--color-text-muted)">${formatBytes(f.size)}</span></div>`
+    ).join('');
+    lucide.createIcons();
+  }
+
+  async function doUpload() {
+    if (!selectedFiles.length) { showToast('Seleccioná un archivo', 'error'); return; }
+
+    const btn = document.getElementById('btn-upload');
+    const progressDiv = document.getElementById('upload-progress');
+    const progressBar = document.getElementById('upload-progress-bar');
+    const progressText = document.getElementById('upload-progress-text');
+    btn.disabled = true;
+    btn.textContent = 'Subiendo...';
+    progressDiv.classList.remove('hidden');
+    progressBar.style.width = '0%';
+
+    const folderId = document.getElementById('upload-folder-id').value.trim();
+
+    try {
+      if (selectedFiles.length === 1) {
+        const fd = new FormData();
+        fd.append('file', selectedFiles[0]);
+        if (folderId) fd.append('folder_id', folderId);
+        const resp = await apiUpload('/files', fd, {
+          onProgress(pct) {
+            progressBar.style.width = pct + '%';
+            progressText.textContent = pct + '%';
+          }
+        });
+        if (resp?.ok || resp?.status === 201) {
+          showToast('Archivo subido correctamente');
+        } else {
+          showToast('Error al subir', 'error');
+        }
+      } else {
+        const fd = new FormData();
+        selectedFiles.forEach(f => fd.append('files', f));
+        if (folderId) fd.append('folder_id', folderId);
+        const resp = await apiUpload('/files/batch', fd, {
+          onProgress(pct) {
+            progressBar.style.width = pct + '%';
+            progressText.textContent = `Subiendo ${selectedFiles.length} archivos… ${pct}%`;
+          }
+        });
+        if (resp?.ok || resp?.status === 201) {
+          const data = await resp.json();
+          showToast(`${data.successful}/${data.total} archivos subidos`);
+        } else {
+          showToast('Error al subir', 'error');
+        }
+      }
+      hideUploadModal();
+      loadFiles();
+    } catch (e) {
+      showToast('Error: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i data-lucide="upload" class="w-3.5 h-3.5" aria-hidden="true"></i> Subir';
+      progressDiv.classList.add('hidden');
+      lucide.createIcons();
+    }
+  }
+
+  // Close modal on backdrop click
+  document.getElementById('upload-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) hideUploadModal();
+  });
+
+  // Enter key on search
+  document.getElementById('filter-search').addEventListener('keyup', (e) => {
+    if (e.key === 'Enter') loadFiles();
+  });
+
+  loadFiles();
+</script>
+{% endblock %}

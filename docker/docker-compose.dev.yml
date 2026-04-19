@@ -1,0 +1,46 @@
+# ============================================================================
+# Drive Service - Docker Compose (Development)
+# ============================================================================
+# 
+# Local development without Traefik.
+# Access API directly at: http://localhost:8084
+#
+# Usage:
+#   docker compose -f docker/docker-compose.dev.yml up -d
+#   docker compose -f docker/docker-compose.dev.yml logs -f
+#   docker compose -f docker/docker-compose.dev.yml down
+# ============================================================================
+
+name: drive-dev
+
+services:
+  # ---------------------------------------------------------------------------
+  # Drive API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: drive_api
+    env_file:
+      - ../.env
+    environment:
+      DEBUG: "true"
+    ports:
+      - "${API_PORT:-8084}:8084"
+    volumes:
+      # Mount source for hot reload
+      - ../app:/app/app:ro
+      # Mount credentials (create this folder and add your credentials)
+      - ../credentials:/app/credentials:ro
+      # Logs
+      - drive_logs:/app/logs
+    networks:
+      - drive_network
+
+networks:
+  drive_network:
+    driver: bridge
+
+volumes:
+  drive_logs:

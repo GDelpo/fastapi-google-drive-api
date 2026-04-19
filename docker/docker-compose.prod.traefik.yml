@@ -1,0 +1,73 @@
+# ============================================================================
+# Drive Service - Docker Compose (Production with Traefik)
+# ============================================================================
+#
+# PREREQUISITES:
+#   1. Traefik running: docker compose -f docker-compose.traefik.yml up -d
+#   2. Network created: docker network create traefik-public
+#   3. .env file configured in parent directory
+#   4. credentials/google_credentials.json existente
+#
+# USAGE:
+#   cd drive
+#   docker compose --env-file .env -f docker/docker-compose.prod.traefik.yml up -d --build
+#   docker compose --env-file .env -f docker/docker-compose.prod.traefik.yml logs -f
+#
+# ACCESS:
+#   Via Traefik: http://<server>/drive/api/v1/...
+#   Health:      http://<server>/drive/health
+#   Docs:        http://<server>/drive/docs
+# ============================================================================
+
+name: drive
+
+services:
+  # ---------------------------------------------------------------------------
+  # Drive API
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.prod
+    image: drive-api:${PROJECT_VERSION:-latest}
+    container_name: drive_api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      DEBUG: "false"
+    volumes:
+      - ../credentials:/app/credentials:ro
+    networks:
+      - traefik-public
+    labels:
+      # Enable Traefik
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      
+      # Router: Match requests to /drive/*
+      - "traefik.http.routers.drive.rule=PathPrefix(`/drive`)"
+      - "traefik.http.routers.drive.entrypoints=web"
+      - "traefik.http.routers.drive.service=drive"
+      
+      # Middlewares: add prefix header + strip prefix
+      - "traefik.http.routers.drive.middlewares=drive-prefix,drive-strip"
+      - "traefik.http.middlewares.drive-prefix.headers.customrequestheaders.X-Forwarded-Prefix=/drive"
+      - "traefik.http.middlewares.drive-strip.stripprefix.prefixes=/drive"
+      
+      # Service: Load balancer configuration
+      - "traefik.http.services.drive.loadbalancer.server.port=8000"
+      - "traefik.http.services.drive.loadbalancer.healthcheck.path=/health"
+      - "traefik.http.services.drive.loadbalancer.healthcheck.interval=30s"
+      - "traefik.http.services.drive.loadbalancer.healthcheck.timeout=15s"
+    command: gunicorn app.main:app --workers 2 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --log-level info --forwarded-allow-ips='*'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  traefik-public:
+    external: true
+
